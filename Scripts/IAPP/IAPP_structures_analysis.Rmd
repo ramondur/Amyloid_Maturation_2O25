@@ -1,0 +1,478 @@
+---
+title: "IAPP structures analysis"
+output: html_notebook
+---
+
+This script can be used to generate all plots in Figures 1, Figure 2 and Supplementary Figure 1. 
+
+Load all packages and functions.
+
+```{r setup}
+library(ggplot2)
+library(plotly)
+library(stats)
+library(missMDA)
+library(dplyr)
+library(ggrepel)
+library(viridis)
+```
+
+Load per-residue energy contributions. These energies were extracted using the Sequence Detail function in FoldX, applied to Repaired PDB structures along the IAPP fibril maturation trajectory.
+
+```{r}
+IAPP_fibrils <- read.csv("Files/Sequence_Detail_Files/Sequence_Detail_IAPP_fibrils.txt", sep="")
+list_names <- strsplit(as.character(IAPP_fibrils$Timeorder), "_")
+res <- matrix(nrow = length(IAPP_fibrils$Timeorder), ncol = 1)
+for (i in 1:length(IAPP_fibrils$Timeorder)){
+  res[i,] <- list_names[[i]][1]
+}
+IAPP_fibrils$Timeorder <- res
+
+#Filter out structures with very low resolutions or high steric clashes
+IAPP_resolution <- read.delim("Files/Resolution/IAPP_resolution.txt")
+poor_structures <- IAPP_fibrils %>%
+  group_by(TO_Chains) %>%
+  summarize(avg_value = max(V16))
+poor_structures <- merge(poor_structures, IAPP_resolution)
+poor_structures$flag <- ifelse(poor_structures$Resolution > (3.5 - 0.125 * poor_structures$avg_value), "Above Line", "Below Line")
+poor_structures$clean_labels <- poor_structures$Timeorder
+poor_structures$clean_labels <- paste0(poor_structures$Timeorder,"_",poor_structures$Chain)
+p <- ggplot(poor_structures, aes(x = avg_value, y = Resolution, color = flag)) +
+  geom_point(size = 3) +  # Scatter plot
+  # Label only the red points (Above Line)
+  geom_text_repel(aes(label = ifelse(flag == "Above Line", clean_labels, NA)), 
+                  size = 3, 
+                  max.overlaps = Inf) +  
+
+  # Partitioning line
+  geom_abline(intercept = 3.5, slope = -0.125, linetype = "dashed", color = "black", size = 1) +  
+  # Color customization
+  scale_color_manual(values = c("Above Line" = "red", "Below Line" = "black")) +  
+  # Labels and theme
+  labs(x = "Max. VDW clash value (kcal/mol)", y = "Resolution (Å)", color = "Status") +
+  theme_bw(base_size = 14) +  
+  theme(
+    aspect.ratio = 1,  
+    panel.border = element_rect(color = "black", fill = NA, size = 1),  
+    # Ensure all text is black
+    text = element_text(color = "black"),  
+    axis.text.x = element_text(color = "black", angle = 45, hjust = 1, size = 12),  
+    axis.text.y = element_text(color = "black", size = 12),  
+    axis.title.x = element_text(color = "black", size = 12),  
+    axis.title.y = element_text(color = "black", size = 12),  
+    plot.subtitle = element_text(color = "black", size = 12),  
+    plot.caption = element_text(color = "black", size = 12),  
+    legend.text = element_text(color = "black", size = 12),  
+    legend.title = element_text(color = "black", size = 12),  
+    legend.position = "none"
+  )
+p
+poor_structures$id <- paste0(poor_structures$Timeorder,"_",poor_structures$Chain)
+IAPP_resolution$id <- paste0(IAPP_resolution$Timeorder,"_",IAPP_resolution$Chain)
+IAPP_resolution <- subset(IAPP_resolution, !id %in% poor_structures$id[which(poor_structures$flag == "Above Line")])
+```
+
+Make Ramachandran plots (Supplementary Figure 1).
+
+```{r}
+colours <- c("white","darkblue", "lightblue", "yellow","red")
+data3 <- IAPP_fibrils
+data3$TO_Chains <- NULL
+data3$Column <- NULL
+data3$CombinedLabel <- with(data3, paste0(Timeorder, " ", Chain))
+SSdensity <- ggplot(data3, aes(x = V6, y = V7)) +
+  geom_point() + 
+  stat_density2d(aes(fill = ..density..^0.20), geom = "tile", contour = FALSE) + 
+  scale_fill_gradientn(
+    limits = c(0, 0.3),
+    colours = colours
+  ) +
+  scale_x_continuous(expand = c(0, 0), limits = c(-180, 180)) +
+  scale_y_continuous(expand = c(0, 0), limits = c(-180, 180)) +
+  facet_wrap(~ CombinedLabel, ncol = 7) +
+  coord_fixed() +  # <-- this ensures square plots
+  ylab("Psi (degrees)") +
+  xlab("Phi (degrees)") +
+  theme(
+    strip.background = element_blank(),
+    panel.border = element_rect(color = "black", fill = NA, size = 1)
+  )
+SSdensity
+```
+
+Calculate distribution of dG energies, backbone H-bond energies, solvation energies and side chain burial on core protofibrils of the L-lineage (Figure 1c, Figure 1d, Figure 1e, Figure 1f , Figure 1g and Figure 1h).
+
+```{r}
+data3 <- IAPP_fibrils
+data3$TO_Chains <- NULL
+data3$Column <- NULL
+data3$CombinedLabel <- with(data3, paste0(Timeorder, " ", Chain))
+data3 <- subset(data3, !Chain %in% c("U-stack", "e-stack"))
+data3 <- subset(data3, lineage != "C-lineage")
+custom_colors <- c(
+  "#05a551",  
+  "#f5ee30",  
+  "#f7941c",  
+  "#a87b2c",  
+  "#bf1e2b"   
+)
+custom_colors <- as.data.frame(custom_colors)
+custom_colors$Timeorder <- c("A","B","F","H","I")
+data3 <- merge(data3,custom_colors)
+
+#Calculate dg on L-lineage structures (both protofibrils)
+p <- ggplot(data3, aes(x = V9, color = CombinedLabel)) +
+  geom_density(size = 1.2) +
+    scale_color_manual(values = setNames(data3$custom_colors, data3$CombinedLabel)) +  # Use assigned colors 
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  annotate("text", x = -2.5, y = 0.05, label = "Stabilizing", hjust = 0, size = 4) +
+  annotate("text", x = 0.5, y = 0.05, label = "Destabilizing", hjust = 0, size = 4) +
+  labs(
+    x = expression("dG residue contribution (kcal/mol)"),
+    y = "Density"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(legend.position = "none")
+p
+
+#Calculate backbone H-bond on L-lineage structures (both protofibrils)
+p <- ggplot(data3, aes(x = V10, color = CombinedLabel)) +
+  geom_density(size = 1.2) +
+    scale_color_manual(values = setNames(data3$custom_colors, data3$CombinedLabel)) +  # Use assigned colors 
+  labs(
+    x = expression("dG residue contribution (kcal/mol)"),
+    y = "Density"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(legend.position = "none")
+p
+
+#Calculate van der Waals energies on L-lineage structures (both protofibrils)
+p <- ggplot(data3, aes(x = V12, color = CombinedLabel)) +
+  geom_density(size = 1.2) +
+    scale_color_manual(values = setNames(data3$custom_colors, data3$CombinedLabel)) +  # Use assigned colors 
+  labs(
+    x = expression("dG residue contribution (kcal/mol)"),
+    y = "Density"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(legend.position = "none")
+p
+
+#Calculate solvation energies on L-lineage structures (both protofibrils)
+p <- ggplot(data3, aes(x = V15, color = CombinedLabel)) +
+  geom_density(size = 1.2) +
+    scale_color_manual(values = setNames(data3$custom_colors, data3$CombinedLabel)) +  # Use assigned colors 
+  labs(
+    x = expression("dG residue contribution (kcal/mol)"),
+    y = "Density"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(legend.position = "none")
+p
+
+#Calculate backbone burial on L-lineage structures (both protofibrils)
+ggplot(data3, aes(x = V34, y = CombinedLabel, fill = CombinedLabel)) +
+  geom_density_ridges(scale = 5, color = "black", linewidth = 0.3, alpha = 0.8) +
+  scale_fill_manual(values = setNames(data3$custom_colors, data3$CombinedLabel)) +  # Use assigned colors 
+  labs(x = "Backbone Burial", y = "Protofibril") +
+  theme_minimal(base_size = 14) +
+  theme(
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    legend.position = "none")
+p
+
+#Backbone H-bond energies for stabilizing and destabilizing residues
+data3$is.stable <- "Stabilizing"
+data3$is.stable[which(data3$V9 > 0)] <- "Destabilizing"
+ggplot(data3, aes(x = is.stable, y = V10, fill = is.stable)) +
+  geom_boxplot(notch = TRUE, outlier.color = "black", width = 0.6) +
+  scale_fill_manual(values = c("Destabilizing" = "#d9e9a3", "Stabilizing" = "#a6cee3")) +
+  labs(y = "Backbone H-bond (kcal/mol)", x = NULL) +
+  theme_minimal(base_size = 14) +
+  theme(
+    axis.title.x = element_blank(),
+    legend.position = "none"
+  ) +
+  annotate("text", x = 1.5, y = 0, label = "****", size = 6)
+```
+
+Calculate distribution of dG energies, backbone H-bond energies, solvation energies and side chain burial on core protofibrils of the C-lineage (Figure 1c, Figure 1d, Figure 1e, Figure 1f , Figure 1g and Figure 1h).
+
+```{r}
+data3 <- IAPP_fibrils
+data3$TO_Chains <- NULL
+data3$Column <- NULL
+data3$CombinedLabel <- with(data3, paste0(Timeorder, " ", Chain))
+data3 <- subset(data3, !Chain %in% c("U-stack", "e-stack"))
+data3 <- subset(data3, lineage != "L-lineage")
+custom_colors <- c(
+  "#05a551",  
+  "#f9c8d0",  
+  "#ec008b",  
+  "#662d91",  
+  "#2d3092"   
+)
+custom_colors <- as.data.frame(custom_colors)
+custom_colors$Timeorder <- c("A","C","D","E","G")
+data3 <- merge(data3,custom_colors)
+
+#Calculate dg on L-lineage structures (both protofibrils)
+p <- ggplot(data3, aes(x = V9, color = CombinedLabel)) +
+  geom_density(size = 1.2) +
+    scale_color_manual(values = setNames(data3$custom_colors, data3$CombinedLabel)) +  # Use assigned colors 
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  annotate("text", x = -2.5, y = 0.05, label = "Stabilizing", hjust = 0, size = 4) +
+  annotate("text", x = 0.5, y = 0.05, label = "Destabilizing", hjust = 0, size = 4) +
+  labs(
+    x = expression("dG residue contribution (kcal/mol)"),
+    y = "Density"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(legend.position = "none")
+p
+
+#Calculate backbone H-bond on L-lineage structures (both protofibrils)
+p <- ggplot(data3, aes(x = V10, color = CombinedLabel)) +
+  geom_density(size = 1.2) +
+    scale_color_manual(values = setNames(data3$custom_colors, data3$CombinedLabel)) +  # Use assigned colors 
+  labs(
+    x = expression("dG residue contribution (kcal/mol)"),
+    y = "Density"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(legend.position = "none")
+p
+
+#Calculate van der Waals energies on L-lineage structures (both protofibrils)
+p <- ggplot(data3, aes(x = V12, color = CombinedLabel)) +
+  geom_density(size = 1.2) +
+    scale_color_manual(values = setNames(data3$custom_colors, data3$CombinedLabel)) +  # Use assigned colors 
+  labs(
+    x = expression("dG residue contribution (kcal/mol)"),
+    y = "Density"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(legend.position = "none")
+p
+
+#Calculate solvation energies on L-lineage structures (both protofibrils)
+p <- ggplot(data3, aes(x = V15, color = CombinedLabel)) +
+  geom_density(size = 1.2) +
+    scale_color_manual(values = setNames(data3$custom_colors, data3$CombinedLabel)) +  # Use assigned colors 
+  labs(
+    x = expression("dG residue contribution (kcal/mol)"),
+    y = "Density"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(legend.position = "none")
+p
+
+#Calculate backbone burial on L-lineage structures (both protofibrils)
+ggplot(data3, aes(x = V34, y = CombinedLabel, fill = CombinedLabel)) +
+  geom_density_ridges(scale = 5, color = "black", linewidth = 0.3, alpha = 0.8) +
+  scale_fill_manual(values = setNames(data3$custom_colors, data3$CombinedLabel)) +  # Use assigned colors 
+  labs(x = "Backbone Burial", y = "Protofibril") +
+  theme_minimal(base_size = 14) +
+  theme(
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    legend.position = "none")
+p
+
+#Backbone H-bond energies for stabilizing and destabilizing residues
+data3$is.stable <- "Stabilizing"
+data3$is.stable[which(data3$V9 > 0)] <- "Destabilizing"
+ggplot(data3, aes(x = is.stable, y = V10, fill = is.stable)) +
+  geom_boxplot(notch = TRUE, outlier.color = "black", width = 0.6) +
+  scale_fill_manual(values = c("Destabilizing" = "#d9e9a3", "Stabilizing" = "#a6cee3")) +
+  labs(y = "Backbone H-bond (kcal/mol)", x = NULL) +
+  theme_minimal(base_size = 14) +
+  theme(
+    axis.title.x = element_blank(),
+    legend.position = "none"
+  ) +
+  annotate("text", x = 1.5, y = 0, label = "****", size = 6)
+```
+
+Per-residue energy profiles (Figure 2A), total stability energies per protofilament (Figure 1B) and individual APR energies per protofilament (Figure 2B)
+
+```{r}
+#Start by filtering out the outer chains as well as the two most outer residues
+data3 <- IAPP_fibrils
+data3_filtered <- subset(data3, !V3 %in% c("A","B","S","T","d","U","n","e"))
+data3_filtered$factor <- paste0(data3_filtered$Timeorder,"_",data3_filtered$Chain)
+data3_filtered$TO_Chains <- paste0(data3_filtered$TO_Chains,"_",data3_filtered$type)
+aggregate_energies <-  aggregate(V9 ~ factor + V4, data=data3_filtered, FUN="mean")
+aggregate_energies <- subset(aggregate_energies, !V4 %in% c(10,11))
+aggregate_energies2 <- tidyr::spread(aggregate_energies, V4,V9)
+rownames(aggregate_energies2) <- aggregate_energies2$factor
+aggregate_energies2<-aggregate_energies2[, -1]
+a <- Heatmap(as.matrix(aggregate_energies2), 
+        name = "DDG (Kcal/mol)", cluster_columns = FALSE, col = circlize::colorRamp2(c(2,0,-2), c("red", "white", "blue")),
+        column_names_gp = gpar(fontsize = 12) , row_names_gp = gpar(fontsize = 12),border_gp = gpar(col = "black", lty = 1),
+        cluster_rows = FALSE)
+a
+
+#Get global energies for each protofilament, as well as individual APR energies. This just displays the energies. Plots were made using Prism
+#ALL energies
+rowSums(aggregate_energies2, na.rm = TRUE)
+
+#N-ter APR
+N_APR <- aggregate_energies2[,1:6]
+rowSums(nN_APR, na.rm = TRUE)
+
+#Central APR
+M_APR <- aggregate_energies2[,11:16]
+rowSums(M_APR, na.rm = TRUE)
+
+#C-ter APR
+C_APR <- aggregate_energies2[,19:24]
+rowSums(C_APR, na.rm = TRUE)
+```
+
+PCA analysis for all IAPP fibrils (Figure 2f and Figure 2g).
+
+```{r}
+list_names <- strsplit(as.character(rownames(aggregate_energies2)), "_")
+res1 <- matrix(nrow = nrow(aggregate_energies2), ncol = 1)
+res2 <- matrix(nrow = nrow(aggregate_energies2), ncol = 1)
+for (i in 1:nrow(aggregate_energies2)){
+  res1[i,] <- list_names[[i]][1]
+  res2[i,] <- list_names[[i]][2]
+}
+Structure <- res1
+Structure <- as.character(res1)
+Protofilaments <- res2
+group_numbers <- c(1,1,2,2,3,3,4,4,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,13,13,14,14)
+#Data imputation for missing values
+imputed_data <- imputePCA(energies_PCA, ncp=2, method = "Regularized")
+#New dataframe with imputed data for plotting in Prism
+imputed_energies <- as.data.frame(imputed_data$completeObs)
+#Run PCA
+PCA <- prcomp(imputed_energies, scale. = TRUE)
+#Principal components in a dataframe
+emb <- as.data.frame(PCA$x)
+emb$Structure <- Structure
+emb$Protofilaments <- Protofilaments
+emb$colnum <- group_numbers
+#extract Variances of main PCs -Do this for PC1, PC2 and PC3
+PC1_contr<-fviz_contrib(PCA, choice = "var", axes = 1)
+PC1_final<-as.data.frame(PC1_contr[1])
+PC2_contr<-fviz_contrib(PCA, choice = "var", axes = 2)
+PC2_final<-as.data.frame(PC2_contr[1])
+PC3_contr<-fviz_contrib(PCA, choice = "var", axes = 3)
+PC3_final<-as.data.frame(PC3_contr[1])
+PC1_final$PC2 <- PC2_final$data.contrib
+PC1_final$PC3 <- PC3_final$data.contrib
+PC1_final$data.name <- as.character(PC1_final$data.name)
+PC1_final$data.name <- substr(PC1_final$data.name, 2, nchar(PC1_final$data.name))
+#Contributions were saved and exported to Prism
+# Perform K-Means Clustering
+set.seed(123)  # For reproducibility
+num_clusters <- 6  # Change this based on the data
+kmeans_result <- kmeans(emb[, c("PC1", "PC2", "PC3")], centers = num_clusters)
+emb$cluster <- as.factor(kmeans_result$cluster)
+emb$colnum <- as.factor(emb$colnum)
+# Find max values for each axis
+max_PC1 <- max(emb$PC1)
+max_PC2 <- max(emb$PC2)
+max_PC3 <- max(emb$PC3)
+min_PC1 <- min(emb$PC1)
+min_PC2 <- min(emb$PC2)
+min_PC3 <- min(emb$PC3)
+color_palette <- c("#009900", "yellow", "pink", "magenta", "grey", "purple", 
+                   "grey", "orange", "darkblue", "grey", "goldenrod4", "grey20", 
+                   "darkred", "grey20")
+
+plot <- plot_ly() %>%
+  # Main 3D scatter plot
+  add_trace(
+    data = emb,
+    x = ~PC1, 
+    y = ~PC2, 
+    z = ~PC3,
+    #text = ~names,
+    color = ~colnum,
+    colors = color_palette,
+    type = "scatter3d", 
+    mode = "markers+text",
+    marker = list(size = 8, opacity = 0.8, line = list(color = 'black', width = 1))
+  ) %>%
+  # XY projection (Z = 0)
+  add_trace(
+    data = emb,
+    x = ~PC1, 
+    y = ~PC2, 
+    z = -3.7,
+    color = ~colnum,
+    colors = color_palette,
+    type = "scatter3d",
+    mode = "markers",
+    marker = list(size = 1, opacity = 1, symbol = 'circle')
+  ) %>%
+  # Add the top axis lines
+  # X-axis Top Trace
+  add_trace(
+    x = c(min_PC1, max_PC1),
+    y = c(max_PC2, max_PC2), 
+    z = c(max_PC3, max_PC3),
+    type = "scatter3d",
+    mode = "lines",
+    line = list(color = "red", width = 4),
+    name = "X-Axis Top"
+  ) %>%
+  # XZ projection (Y = 0)
+  add_trace(
+    data = emb,
+    x = ~PC1, 
+    y = 4, 
+    z = ~PC3,
+    color = ~colnum,
+    colors = color_palette,
+    type = "scatter3d",
+    mode = "markers",
+    marker = list(size = 1, opacity = 1, symbol = 'circle')
+  ) %>%
+  # YZ projection (X = 0)
+  add_trace(
+    data = emb,
+    x = 4, 
+    y = ~PC2, 
+    z = ~PC3,
+    color = ~colnum,
+    colors = color_palette,
+    type = "scatter3d",
+    mode = "markers",
+    marker = list(size = 1, opacity = 1, symbol = 'circle')
+  ) %>%
+  add_trace(
+    x = kmeans_result$centers[, 1],
+    y = kmeans_result$centers[, 2],
+    z = kmeans_result$centers[, 3],
+    type = "scatter3d",
+    mode = "markers",
+    marker = list(
+      opacity = 0.2, 
+      size = c(60, 140, 140, 60, 240, 260), 
+      color = I(c("#009900", "grey", "orange", "yellow", "pink", "black")),  # Ensure only 6 colors
+      symbol = "circle"
+    ),
+    name = "Cluster Centers"
+  ) %>%
+  # Customize layout
+  layout(
+    title = "3D Plot of Secondary Structure Content with 2D Projections",
+    scene = list(
+      xaxis = list(title = "<b>PC1 (30.5%)</b>", linewidth = 4),
+      yaxis = list(title = "<b>PC2 (25.1%)</b>", linewidth = 4),
+      zaxis = list(title = "<b>PC3 (11%)</b>", linewidth = 4),
+      aspectmode = "manual",
+      aspectratio = list(x = 1, y = 1, z = 1),  # Adjust ratio for visibility
+      camera = list(eye = list(x = -2.5, y = -1.8, z = 1))
+    )
+  )
+# Show the plot
+plot
+```

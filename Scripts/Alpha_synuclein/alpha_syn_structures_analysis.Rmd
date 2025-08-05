@@ -1,0 +1,261 @@
+---
+title: "Alpha-synuclein structures analysis"
+output: html_notebook
+---
+
+This script can be used to generate all plots in Figures 6. 
+
+Load all packages and functions.
+
+```{r setup}
+knitr::opts_knit$set(root.dir = "/Users/u0125634/Documents/PhD/Projects/Time_series_structures/Time_series_structures_Nikos")
+library(ggplot2)
+library(stringr)
+library(dplyr)
+library(tidyr)
+library(ggpubr)
+library(reshape2)
+library(ggridges)
+library(car)
+library(scales)
+library(factoextra)
+library(plotly)
+library(corrplot)
+library(ComplexHeatmap)
+library(stats)
+library(missMDA)
+library(ggrepel)
+library(uwot)
+```
+
+Load per-residue energy contributions. These energies were extracted using the Sequence Detail function in FoldX, applied to Repaired PDB structures along α-synuclein fibrils remodeling trajectory upon heparin binding.
+
+```{r}
+files <- list.files(path = "Files/Sequence_Detail_Files/AS/",pattern = ".fxout")
+#Read first file to create variables in a data frame
+data <- read.table("Files/Sequence_Detail_Files/AS/SD_Hep-remod-3_Repair.fxout",
+                   header=FALSE,
+                   sep="\t")
+data <- data[0,]
+#Read remaining files and rbind them to dataset
+for (f in files) {
+  data <- rbind(data,read.table(paste0("Files/Sequence_Detail_Files/AS/",f),
+                                header=FALSE,
+                                sep="\t"))
+}
+#Remove all the GAPS and have same residues as in the WT structure
+data <- subset(data, !is.na(V4))
+data <- subset(data, V4 %in% c(37:94))
+data$Chain[data$V3=="A" | data$V3=="C" | data$V3=="E" | data$V3=="G" | data$V3=="I" | data$V3=="K" | data$V3=="M" | data$V3=="O" | data$V3=="Q" | data$V3=="S"] <- "A-stack"
+data$Chain[data$V3=="B" | data$V3=="D" | data$V3=="F" | data$V3=="H" | data$V3=="J" | data$V3=="L" | data$V3=="N" | data$V3=="P" | data$V3=="R" | data$V3=="T"] <- "B-stack"
+data$Chain[data$V3=="U" | data$V3=="V" | data$V3=="W" | data$V3=="X" | data$V3=="Y" | data$V3=="Z" | data$V3=="a" | data$V3=="b" | data$V3=="c" | data$V3=="d"] <- "U-stack"
+data$Chain[data$V3=="e" | data$V3=="f" | data$V3=="g" | data$V3=="h" | data$V3=="i" | data$V3=="j" | data$V3=="k" | data$V3=="l" | data$V3=="m" | data$V3=="n"] <- "e-stack"
+data2<-separate(data, col=V1, into=c('dir','Structure'), sep='./')
+data4<-subset(data2, data2$V6=="-9999" | data2$V7=="-9999")
+data3 <- anti_join(data2,data4)
+rm(data4)
+#Generate structure timeorder column (Lovestam et al. 2023 - average occurence)
+data3$Timeorder <- NA
+data3$Timeorder[data3$Structure=='WT_Repair.pdb'] <- "A_WT"
+data3$Timeorder[data3$Structure=='Hep-remod-1_Repair.pdb'] <- "B_Hep-1"
+data3$Timeorder[data3$Structure=='Hep-remod-2_Repair.pdb'] <- "C_Hep-2"
+data3$Timeorder[data3$Structure=='Hep-remod-3_Repair.pdb'] <- "D_Hep-3"
+
+#Filter out structures with very low resolutions or high steric clashes
+a_syn_resolution <- read.delim("Files/Resolution/a_syn_resolution.txt")
+poor_structures <- data3 %>%
+  group_by(Timeorder,Chain) %>%
+  summarize(avg_value = max(V16))
+poor_structures <- merge(poor_structures, a_syn_resolution)
+poor_structures$flag <- ifelse(poor_structures$Resolution > (3.5 - 0.125 * poor_structures$avg_value), "Above Line", "Below Line")
+poor_structures$clean_labels <- gsub("^[A-Z]_", "", poor_structures$Timeorder)
+poor_structures$clean_labels <- paste0(poor_structures$clean_labels,"_",poor_structures$Chain)
+p <- ggplot(poor_structures, aes(x = avg_value, y = Resolution, color = flag)) +
+  geom_point(size = 3) +  # Scatter plot
+  # Label only the red points (Above Line)
+  geom_text_repel(aes(label = ifelse(flag == "Above Line", clean_labels, NA)), 
+                  size = 3, 
+                  max.overlaps = Inf) +  
+  # Partitioning line
+  geom_abline(intercept = 3.5, slope = -0.125, linetype = "dashed", color = "black", size = 1) +  
+  # Color customization
+  scale_color_manual(values = c("Above Line" = "red", "Below Line" = "black")) +  
+  # Labels and theme
+  labs(x = "Max. VDW clash value (kcal/mol)", y = "Resolution (Å)", color = "Status") +
+  theme_bw(base_size = 14) +  
+  theme(
+    aspect.ratio = 1,  
+    panel.border = element_rect(color = "black", fill = NA, size = 1),  
+    # Ensure all text is black
+    text = element_text(color = "black"),  
+    axis.text.x = element_text(color = "black", angle = 45, hjust = 1, size = 12),  
+    axis.text.y = element_text(color = "black", size = 12),  
+    axis.title.x = element_text(color = "black", size = 12),  
+    axis.title.y = element_text(color = "black", size = 12),  
+    plot.subtitle = element_text(color = "black", size = 12),  
+    plot.caption = element_text(color = "black", size = 12),  
+    legend.text = element_text(color = "black", size = 12),  
+    legend.title = element_text(color = "black", size = 12),  
+    legend.position = "none"
+  )
+p
+poor_structures$id <- paste0(poor_structures$Timeorder,"_",poor_structures$Chain)
+data3$id <- paste0(data3$Timeorder,"_",data3$Chain)
+data3 <- subset(data3, !id %in% poor_structures$id[which(poor_structures$flag == "Above Line")])
+```
+
+Make Ramachandran plots (Supplementary Figure 7).
+
+```{r}
+colours <- c("white","darkblue", "lightblue", "yellow","red")
+data3$CombinedLabel <- with(data3, paste0(Timeorder, " ", Chain))
+SSdensity <- ggplot(data3, aes(x = V6, y = V7)) +
+  geom_point() + 
+  stat_density2d(aes(fill = ..density..^0.20), geom = "tile", contour = FALSE) + 
+  scale_fill_gradientn(
+    limits = c(0, 0.3),
+    colours = colours
+  ) +
+  scale_x_continuous(expand = c(0, 0), limits = c(-180, 180)) +
+  scale_y_continuous(expand = c(0, 0), limits = c(-180, 180)) +
+  facet_wrap(~ Timeorder, ncol = 9) +
+  ylab("Psi (degrees)") +
+  xlab("Phi (degrees)") +
+  theme(
+    strip.background = element_blank(),
+    panel.border = element_rect(color = "black", fill = NA, size = 1)
+  )
+SSdensity
+```
+
+Calculate distribution of backbone H-bond energies (Figure 6b).
+
+```{r}
+# Color palette matching your figure
+group_colors <- c("A_WT" = "gray40",
+                  "B_Hep-1" = "#ccff66",
+                  "C_Hep-2" = "orange",
+                  "D_Hep-3" = "darkgreen")
+# Create the plot
+data3 <- subset(data3, !V3 %in% c("A","B","S","T","d","U","n","e"))
+p <- ggplot(data3, aes(x = Timeorder, y = V10, fill = Timeorder)) +
+  geom_boxplot(notch = TRUE, outlier.shape = NA) +
+  scale_fill_manual(values = group_colors) +
+  theme_classic(base_size = 14) +
+  ylab("Backbone H-bond (kcal/mol)") +
+  xlab("") +
+  theme(legend.position = "bottom") +
+  guides(fill = guide_legend(title = NULL)) +
+  stat_compare_means(comparisons = list(
+    c("A_WT", "B_Hep-1"),
+    c("A_WT", "C_Hep-2"),
+    c("C_Hep-2", "D_Hep-3")
+  ),
+  method = "t.test", label = "p.signif") +
+  ylim(-2, 0.5)
+print(p)
+```
+
+Per-residue energy profiles (Figure 4F)
+
+```{r}
+#Check energies per residue and structure
+#Start by filtering out the outer chains as well as the two most outer residues
+data3_filtered <- subset(data3, !V3 %in% c("A","B","S","T","d","U","n","e"))
+data3_filtered$factor <- paste0(data3_filtered$Timeorder,"_",data3_filtered$Chain)
+data3_filtered$TO_Chains <- paste0(data3_filtered$TO_Chains,"_",data3_filtered$type)
+aggregate_energies <-  aggregate(V9 ~ factor + V4, data=data3_filtered, FUN="mean")
+aggregate_energies <- subset(aggregate_energies, !V4 %in% c(304,305,379))
+aggregate_energies2 <- tidyr::spread(aggregate_energies, V4,V9)
+rownames(aggregate_energies2) <- aggregate_energies2$factor
+aggregate_energies2<-aggregate_energies2[, -1]
+a <- Heatmap(as.matrix(aggregate_energies2), 
+        name = "DDG (Kcal/mol)", cluster_columns = FALSE, col = circlize::colorRamp2(c(3,0,-3), c("red", "white", "blue")),
+        column_names_gp = gpar(fontsize = 12) , row_names_gp = gpar(fontsize = 12),border_gp = gpar(col = "black", lty = 1),
+        cluster_rows = FALSE)
+a
+#In the paper, the energies were actually exported to Prism
+```
+
+PCA analysis (Figure 6d and Figure 6e).
+
+```{r}
+# Apply standardization across rows (MARGIN = 1)
+standardize_row <- function(x) {
+  # Ignore NA values for mean and SD computation
+  mean_x <- mean(x, na.rm = TRUE)
+  sd_x <- sd(x, na.rm = TRUE)
+  # Standardize, but leave NA values as is
+  (x - mean_x) / sd_x
+}
+# Apply standardization across rows (MARGIN = 1)
+standardized_data <- t(apply((aggregate_energies2), 1, standardize_row))
+#Data imputation for missing values
+imputed_data <- imputePCA(standardized_data, ncp=3, method = "Regularized")
+#New dataframe with imputed data for plotting in Prism
+imputed_energies <- as.data.frame(imputed_data$completeObs)
+#Run PCA
+PCA <- prcomp(imputed_energies, scale. = FALSE)
+#Principal components in a dataframe
+emb <- as.data.frame(PCA$x)
+rownames(emb) <- rownames(aggregate_energies2) 
+#Set x-y-z variables for plotting
+x <-emb$PC1
+y <-emb$PC2
+z <-emb$PC3
+emb
+#Set w as emb_column, this way colors for backpanels in 3D PCA match - ylab for label positioning
+fviz_eig(PCA, addlabels = TRUE, ylim = c(0, 90))
+list_names <- strsplit(as.character(rownames(emb)), "_")
+list_names2 <- strsplit(as.character(rownames(emb)), "-")
+res <- matrix(nrow = length(emb$PC1), ncol = 1)
+res2 <- matrix(nrow = length(emb$PC1), ncol = 1)
+for (i in 1:length(emb$PC1)){
+  res[i,] <- list_names[[i]][3]
+  res2[i,] <- list_names2[[i]][1]
+}
+emb$Disease <- res
+emb$Type <- res2
+list_names <- strsplit(as.character(emb$Type), "_")
+res <- matrix(nrow = length(emb$Type), ncol = 1)
+for (i in 1:length(emb$Type)){
+  res[i,] <- list_names[[i]][2]
+}
+emb$Type <- res
+emb$Sample <- rownames(imputed_energies)
+emb$Sample <- substring(emb$Sample, 3)
+emb$Sample <- substr(emb$Sample, 1, nchar(emb$Sample) - 6)
+#Trajectory plot
+library(ggrepel)
+a <- ggplot(data = emb,aes(x = PC1, y = PC2)) + #include our data
+  geom_point() +
+  geom_text_repel(aes(label = Sample), size = 3, max.overlaps = 20) +
+  theme_minimal() +
+  labs(x = "PC1 (60.6%)", y = "PC2 (23.9%)")
+a
+#Look at the contributions
+PC1_contr<-fviz_contrib(PCA, choice = "var", axes = 1)
+PC1_final<-as.data.frame(PC1_contr[1])
+plot(PC1_final$data.name,PC1_final$data.contrib)
+PC2_contr<-fviz_contrib(PCA, choice = "var", axes = 2)
+PC2_final<-as.data.frame(PC2_contr[1])
+PC3_contr<-fviz_contrib(PCA, choice = "var", axes = 3)
+PC3_final<-as.data.frame(PC3_contr[1])
+fviz_contrib(PCA, choice = "var", axes = 1:2, top = 100)
+fviz_pca_var(PCA,
+             col.var = "contrib",       # Color by contributions
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             repel = TRUE,              # Avoid label overlap
+             axes = c(1, 2)) +          # Choose dimensions
+  theme_classic(base_size = 14)
+# Extract PCA variable data
+coord <- PCA$rotation[, 1:2]  # Loadings for PC1 and PC2
+contrib <- coord^2
+total_contrib <- 100 * (contrib[,1] + contrib[,2])  # Percent total contribution
+pca_plot_data <- as.data.frame(coord)
+pca_plot_data$TotalContrib_PC1_PC2 <- total_contrib
+pca_plot_data$Variable <- rownames(pca_plot_data)
+pca_plot_data <- pca_plot_data[, c("Variable", "PC1", "PC2", "TotalContrib_PC1_PC2")]
+```
+
+

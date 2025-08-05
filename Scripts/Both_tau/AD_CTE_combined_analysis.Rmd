@@ -1,0 +1,274 @@
+---
+title: "AD_CTE_combined_analysis"
+output: html_notebook
+---
+
+This script can be used to generate Figures 5a, Figure 5b and all plots in Supplementary Figure 5. 
+
+Load all packages and functions.
+
+```{r setup}
+library(ggplot2)
+library(stringr)
+library(dplyr)
+library(tidyr)
+library(ggpubr)
+library(reshape2)
+library(ggridges)
+library(car)
+library(scales)
+library(factoextra)
+library(plotly)
+library(corrplot)
+library(ComplexHeatmap)
+library(stats)
+library(missMDA)
+library(ggrepel)
+library(uwot)
+```
+
+Load per-residue energy contributions for AD and CTE fibrils.
+
+```{r}
+load("Files/Sequence_Detail_Files/Sequence_Detail_AD_fibrils.RData")
+Sequence_Detail_AD_CTE_fibrils <- read.csv("Files/Sequence_Detail_Files/Sequence_Detail_CTE_fibrils.txt", sep="")
+Sequence_Detail_AD_CTE_fibrils$id <- paste0(Sequence_Detail_AD_CTE_fibrils$Timeorder,"_",Sequence_Detail_AD_CTE_fibrils$Chain)
+AD_SD$Timeorder[AD_SD$Structure=='MIA-2_Repair.pdb'] <- "B_MIA-2"
+AD_SD$Timeorder[AD_SD$Structure=='MIA-3_Repair.pdb'] <- "C_MIA-3"
+AD_SD$Timeorder[AD_SD$Structure=='THF_Repair.pdb'] <- "S_THF"
+AD_SD$Timeorder[AD_SD$Structure=='PHFa_Repair.pdb'] <- "T_PHFa"
+AD_SD$Timeorder[AD_SD$Structure=='PHFb_Repair.pdb'] <- "U_PHFb"
+AD_SD$id <- paste0(AD_SD$Timeorder,"_",AD_SD$Chain)
+#Remove all low resolution structures
+AD_SD <- subset(AD_SD, !Timeorder %in% c("E_MIA-5","H_MIA-8","N_LIA-4"))
+AD_SD <- subset(AD_SD, !id %in% c("S_THF_A-stack","Q_LIA-7_A-stack"))
+Sequence_Detail_AD_CTE_fibrils <- subset(Sequence_Detail_AD_CTE_fibrils, !Timeorder %in% c("B_MIA-3","A_MIA-1","M_MIA-14"))
+```
+
+Combined PCA analysis for all AD and CTE fibrils (Figure 5a and Figure 5b).
+
+```{r}
+#Start by filtering out the outer chains as well as the two most outer residues
+Sequence_Detail_AD_CTE_fibrils$Column <- NULL
+AD_SD$TO_Chains <- NULL
+Sequence_Detail_AD_CTE_fibrils$TO_Chains <- NULL
+Sequence_Detail_AD_CTE_fibrils$type <- "CTE"
+AD_SD$type <- "AD"
+data3 <- rbind(Sequence_Detail_AD_CTE_fibrils,AD_SD)
+data3_filtered <- subset(data3, !V3 %in% c("A","B","S","T","d","U","n","e"))
+data3_filtered$factor <- paste0(data3_filtered$Timeorder,"_",data3_filtered$Chain,"_",data3_filtered$type)
+aggregate_energies <-  aggregate(V9 ~ factor + V4, data=data3_filtered, FUN="mean")
+aggregate_energies <- subset(aggregate_energies, !V4 %in% c(304,305,379)) #at least half
+aggregate_energies2 <- tidyr::spread(aggregate_energies, V4,V9)
+rownames(aggregate_energies2) <- aggregate_energies2$factor
+aggregate_energies2<-aggregate_energies2[, -1]
+# Apply standardization across rows (MARGIN = 1)
+standardize_row <- function(x) {
+  # Ignore NA values for mean and SD computation
+  mean_x <- mean(x, na.rm = TRUE)
+  sd_x <- sd(x, na.rm = TRUE)
+  # Standardize, but leave NA values as is
+  (x - mean_x) / sd_x
+}
+standardized_data <- t(apply((aggregate_energies2), 1, standardize_row))
+#Data imputation for missing values
+imputed_data <- imputePCA(standardized_data, ncp=3, method = "Regularized")
+#New dataframe with imputed data for plotting in Prism
+imputed_energies <- as.data.frame(imputed_data$completeObs)
+#Run PCA
+PCA <- prcomp(imputed_energies, scale. = FALSE)
+#Principal components in a dataframe
+emb <- as.data.frame(PCA$x)
+rownames(emb) <- rownames(aggregate_energies2) 
+#Set x-y-z variables for plotting
+x <-emb$PC1
+y <-emb$PC2
+z <-emb$PC3
+#Set w as emb_column, this way colors for backpanels in 3D PCA match - ylab for label positioning
+fviz_eig(PCA, addlabels = TRUE, ylim = c(0, 90))
+list_names <- strsplit(as.character(rownames(emb)), "_")
+list_names2 <- strsplit(as.character(rownames(emb)), "-")
+res <- matrix(nrow = length(emb$PC1), ncol = 1)
+res2 <- matrix(nrow = length(emb$PC1), ncol = 1)
+res3 <- matrix(nrow = length(emb$PC1), ncol = 1)
+for (i in 1:length(emb$PC1)){
+  res[i,] <- list_names[[i]][3]
+  res2[i,] <- list_names2[[i]][1]
+  res3[i,] <- list_names[[i]][4]
+}
+emb$Stack <- res
+emb$Type <- res2
+emb$Disease <- res3
+list_names <- strsplit(as.character(emb$Type), "_")
+res <- matrix(nrow = length(emb$Type), ncol = 1)
+for (i in 1:length(emb$Type)){
+  res[i,] <- list_names[[i]][2]
+}
+emb$Type <- res
+emb$Type[which(emb$Type %in% c("THF","PHFa","PHFb"))] <- "PHF-like"
+emb$Type[which(emb$Type %in% c("CTEI","CTEII"))] <- "CTE-like"
+emb$Sample <- rownames(imputed_energies)
+emb$Sample <- substring(emb$Sample, 3)
+emb$Sample <- gsub("-stack.*", "", emb$Sample)
+# Compute distance and cluster
+dist_matrix <- dist(emb[, 1:3])
+hc <- hclust(dist_matrix, method = "ward.D2")
+# Cut into k clusters
+emb$cluster_hc <- as.factor(cutree(hc, k = 3))
+# Plot
+ggplot(emb, aes(x = PC1, y = PC2, color = cluster_hc)) +
+  geom_point(size = 3) +
+  theme_bw()
+#Trajectory plot
+emb$Sample2 <- str_sub(emb$Sample, end = -3)
+emb$Sample3 <- paste0(emb$Type,"_",emb$Disease)
+gradient_colors <- c(
+  "MIA_AD" = "#6baed6",       # light blue
+  "LIA_AD" = "#2171b5",       # mid blue
+  "PHF-like_AD" = "#08306b",  # dark blue
+
+  "MIA_CTE" = "#fb6a4a",      # light coral
+  "LIA_CTE" = "#cb181d",      # medium red-orange
+  "CTE-like_CTE" = "#67000d"  # deep red
+)
+a <- ggplot(data = emb,aes(x = PC1, y = PC2, color = Sample3)) + #include our data
+  geom_point(aes(shape = Stack),alpha = 1, size = 3) +
+  scale_color_manual(values = gradient_colors)+ 
+  scale_shape_manual(values = c(16, 17, 18, 19, 15)) + 
+  geom_text_repel(aes(label = Sample2), size = 3, max.overlaps = 20) +
+  labs(x = "PC1 (25.3%)", y = "PC2 (12.3%)") +
+  theme_bw(base_size = 14) + 
+  theme(
+    aspect.ratio = 1,  
+    panel.border = element_rect(color = "black", fill = NA, size = 1),  
+    plot.title = element_text(face = "bold", size = 20)  
+  ) +
+  theme(
+    text = element_text(color = "black"),  
+    axis.text.x = element_text(color = "black", angle = 45, hjust = 1, size = 12),  
+    axis.text.y = element_text(color = "black", size = 12),  
+    axis.title.x = element_text(color = "black", size = 12),  
+    axis.title.y = element_text(color = "black", size = 12),  
+    plot.title = element_text(color = "black", size = 12),  
+    plot.subtitle = element_text(color = "black", size = 12),  
+    plot.caption = element_text(color = "black", size = 12),  
+    legend.text = element_text(color = "black", size = 12),  
+    legend.title = element_text(color = "black", size = 12)
+)
+a
+
+#Look at loadings
+loadings <- PCA$rotation  
+# Extract loadings for PC1, PC2, PC3
+PC1_loadings <- loadings[, 1]
+PC2_loadings <- loadings[, 2]
+PC3_loadings <- loadings[, 3]
+```
+
+Cluster only J-folds (Supplementary Figure 5a and Supplementary Figure 5b)
+
+```{r}
+#Start by filtering out the outer chains as well as the two most outer residues
+Sequence_Detail_AD_CTE_fibrils$Column <- NULL
+AD_SD$TO_Chains <- NULL
+Sequence_Detail_AD_CTE_fibrils$TO_Chains <- NULL
+Sequence_Detail_AD_CTE_fibrils$type <- "CTE"
+AD_SD$type <- "AD"
+data3 <- rbind(Sequence_Detail_AD_CTE_fibrils,AD_SD)
+data3_filtered <- subset(data3, !V3 %in% c("A","B","S","T","d","U","n","e"))
+data3_filtered$factor <- paste0(data3_filtered$Timeorder,"_",data3_filtered$Chain,"_",data3_filtered$type)
+data3_filtered$factor <- str_sub(data3_filtered$factor, start = 3)
+data3_filtered <- subset(data3_filtered, !factor %in% c("CTEI_A-stack_CTE","CTEI_B-stack_CTE","CTEII_A-stack_CTE","CTEII_B-stack_CTE","LIA-4_A-stack_CTE","LIA-15_U-stack_CTE","LIA-13_B-stack_CTE","LIA-13_A-stack_CTE","LIA-13_B-stack_CTE","LIA-14_A-stack_CTE","LIA-14_B-stack_CTE","LIA-17_A-stack_CTE","LIA-17_B-stack_CTE","LIA-3_B-stack_CTE","LIA-3_A-stack_CTE","LIA-7_A-stack_CTE","LIA-4_B-stack_CTE","LIA-5_A-stack_CTE","LIA-5_B-stack_CTE","LIA-6_A-stack_CTE","LIA-7_A-stack_CTE","LIA-7_B-stack_CTE","MIA-11_A-stack_CTE","LIA-4_A-stack_CTE","LIA-14_U-stack_CTE"))
+data3_filtered <- subset(data3_filtered, !factor %in% c("MIA-2_A-stack_AD","MIA-7_U-stack_AD","LIA-2_A-stack_AD","LIA-2_B-stack_AD","PHFa_A-stack_AD","PHFa_B-stack_AD","PHFb_A-stack_AD","PHFb_B-stack_AD","THF_A-stack_AD","THF_B-stack_AD","THF_U-stack_AD","LIA-8_A-stack_AD","LIA-7_A-stack_AD","LIA-6_A-stack_AD","LIA-5_A-stack_AD","LIA-4_B-stack_AD","LIA-4_e-stack_AD"))
+aggregate_energies <-  aggregate(V9 ~ factor + V4, data=data3_filtered, FUN="mean")
+aggregate_energies <- subset(aggregate_energies, !V4 %in% c(304,305,379)) #at least half
+aggregate_energies2 <- tidyr::spread(aggregate_energies, V4,V9)
+rownames(aggregate_energies2) <- aggregate_energies2$factor
+aggregate_energies2<-aggregate_energies2[, -1]
+# Apply standardization across rows (MARGIN = 1)
+standardized_data <- t(apply((aggregate_energies2), 1, standardize_row))
+#Data imputation for missing values
+imputed_data <- imputePCA(standardized_data, ncp=3, method = "Regularized")
+#New dataframe with imputed data for plotting in Prism
+imputed_energies <- as.data.frame(imputed_data$completeObs)
+#Run PCA
+PCA <- prcomp(imputed_energies, scale. = FALSE)
+#Principal components in a dataframe
+emb <- as.data.frame(PCA$x)
+rownames(emb) <- rownames(aggregate_energies2) 
+#Set x-y-z variables for plotting
+x <-emb$PC1
+y <-emb$PC2
+z <-emb$PC3
+#Set w as emb_column, this way colors for backpanels in 3D PCA match - ylab for label positioning
+fviz_eig(PCA, addlabels = TRUE, ylim = c(0, 90))
+list_names <- strsplit(as.character(rownames(emb)), "_")
+list_names2 <- strsplit(as.character(rownames(emb)), "-")
+res <- matrix(nrow = length(emb$PC1), ncol = 1)
+res2 <- matrix(nrow = length(emb$PC1), ncol = 1)
+res3 <- matrix(nrow = length(emb$PC1), ncol = 1)
+for (i in 1:length(emb$PC1)){
+  res[i,] <- list_names[[i]][3]
+  res2[i,] <- list_names2[[i]][1]
+  res3[i,] <- list_names[[i]][4]
+}
+emb$Stack <- res
+emb$Type <- res2
+emb$Disease <- res3
+list_names <- strsplit(as.character(emb$Type), "_")
+res <- matrix(nrow = length(emb$Type), ncol = 1)
+for (i in 1:length(emb$Type)){
+  res[i,] <- list_names[[i]][2]
+}
+emb$Type <- res
+emb$Type[which(emb$Type %in% c("THF","PHFa","PHFb"))] <- "PHF-like"
+emb$Type[which(emb$Type %in% c("CTEI","CTEII"))] <- "CTE-like"
+emb$Sample <- rownames(imputed_energies)
+#Do in vs out of residue 356!
+residue_356_facing_2 <- read.delim("Files/Other/residue_356_facing.txt", header=TRUE)
+residue_356_facing_2$Sample <- paste0(residue_356_facing_2$Protofibril,"_",residue_356_facing_2$Disease)
+residue_356_facing_2$Protofibril <- NULL
+residue_356_facing_2$Disease <- NULL
+emb2 <- merge(emb, residue_356_facing_2)
+# Compute distance and cluster
+dist_matrix <- dist(emb2[, 1:3])
+hc <- hclust(dist_matrix, method = "ward.D2")
+# Cut into k clusters
+emb2$cluster_hc <- as.factor(cutree(hc, k = 2))
+# Plot
+ggplot(emb2, aes(x = PC1, y = PC2, color = cluster_hc)) +
+  geom_point(size = 3) +
+  theme_bw()
+#Trajectory plot
+a <- ggplot(data = emb2,aes(x = PC1, y = PC2, color = cluster_hc)) + #include our data
+  geom_point(aes(shape = Stack),alpha = 1, size = 3) +
+  scale_shape_manual(values = c(16, 17, 18, 19, 15)) + 
+  geom_text_repel(aes(label = Sample), size = 3, max.overlaps = 20) +
+  labs(x = "PC1 (19.9%)", y = "PC2 (11.1%)") +
+  theme_bw(base_size = 14) + 
+  theme(
+    aspect.ratio = 1,  
+    panel.border = element_rect(color = "black", fill = NA, size = 1),  
+    plot.title = element_text(face = "bold", size = 20)  
+  ) +
+  theme(
+    text = element_text(color = "black"),  
+    axis.text.x = element_text(color = "black", angle = 45, hjust = 1, size = 12),  
+    axis.text.y = element_text(color = "black", size = 12),  
+    axis.title.x = element_text(color = "black", size = 12),  
+    axis.title.y = element_text(color = "black", size = 12),  
+    plot.title = element_text(color = "black", size = 12),  
+    plot.subtitle = element_text(color = "black", size = 12),  
+    plot.caption = element_text(color = "black", size = 12),  
+    legend.text = element_text(color = "black", size = 12),  
+    legend.title = element_text(color = "black", size = 12)
+)
+a
+
+#Look at loadings
+loadings <- PCA$rotation
+# Extract loadings for PC1, PC2, PC3
+PC1_loadings <- loadings[, 1]
+PC2_loadings <- loadings[, 2]
+PC3_loadings <- loadings[, 3]
+```

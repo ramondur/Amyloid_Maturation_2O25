@@ -1,0 +1,774 @@
+---
+title: "AD tau structures analysis"
+output: html_notebook
+editor_options: 
+  chunk_output_type: inline
+---
+
+This script can be used to generate all plots in Figures 3, Supplementary Figure 3 and Figure 5c, d, e and g. 
+
+Load all packages and functions.
+
+```{r setup}
+library(ggplot2)
+library(plotly)
+library(stats)
+library(missMDA)
+library(dplyr)
+library(ggrepel)
+```
+
+Load per-residue energy contributions. These energies were extracted using the Sequence Detail function in FoldX, applied to Repaired PDB structures along the Alzheimer’s disease (AD) fibril maturation trajectory.
+
+Only structures passing quality control were retained; models exhibiting excessive steric clashes or derived from very low-resolution experimental data were excluded to ensure reliability of the energy estimates (Supplementary Figure 2a).
+
+```{r}
+#Load file and properly order different structures
+load("Files/Sequence_Detail_Files/Sequence_Detail_AD_fibrils.RData")
+AD_SD$Timeorder2[AD_SD$Structure=='MIA-1_Repair.pdb'] <- "A_MIA-1"
+AD_SD$Timeorder2[AD_SD$Structure=='MIA-2_Repair.pdb'] <- "B_MIA-2"
+AD_SD$Timeorder2[AD_SD$Structure=='MIA-3_Repair.pdb'] <- "C_MIA-3"
+AD_SD$Timeorder2[AD_SD$Structure=='MIA-4_Repair.pdb'] <- "D_MIA-4"
+AD_SD$Timeorder2[AD_SD$Structure=='MIA-5_Repair.pdb'] <- "E_MIA-5"
+AD_SD$Timeorder2[AD_SD$Structure=='MIA-10_Repair.pdb'] <- "F_MIA-10"
+AD_SD$Timeorder2[AD_SD$Structure=='MIA-6_Repair.pdb'] <- "G_MIA-6"
+AD_SD$Timeorder2[AD_SD$Structure=='MIA-7_Repair.pdb'] <- "H_MIA-7"
+AD_SD$Timeorder2[AD_SD$Structure=='MIA-8_Repair.pdb'] <- "I_MIA-8"
+AD_SD$Timeorder2[AD_SD$Structure=='MIA-11_Repair.pdb'] <- "J_MIA-11"
+AD_SD$Timeorder2[AD_SD$Structure=='LIA-1_Repair.pdb'] <- "K_LIA-1"
+AD_SD$Timeorder2[AD_SD$Structure=='LIA-8_Repair.pdb'] <- "L_LIA-8"
+AD_SD$Timeorder2[AD_SD$Structure=='LIA-4_Repair.pdb'] <- "M_LIA-4"
+AD_SD$Timeorder2[AD_SD$Structure=='LIA-5_Repair.pdb'] <- "N_LIA-5"
+AD_SD$Timeorder2[AD_SD$Structure=='LIA-7_Repair.pdb'] <- "O_LIA-7"
+AD_SD$Timeorder2[AD_SD$Structure=='PHFb_Repair.pdb'] <- "P_PHFB"
+AD_SD$Timeorder2[AD_SD$Structure=='LIA-2_Repair.pdb'] <- "Q_LIA-2"
+AD_SD$Timeorder2[AD_SD$Structure=='LIA-3_Repair.pdb'] <- "R_LIA-3"
+AD_SD$Timeorder2[AD_SD$Structure=='LIA-6_Repair.pdb'] <- "S_LIA-6"
+AD_SD$Timeorder2[AD_SD$Structure=='THF_Repair.pdb'] <- "T_THF"
+AD_SD$Timeorder2[AD_SD$Structure=='PHFa_Repair.pdb'] <- "U_PHFa"
+AD_SD$Timeorder2[AD_SD$Structure=='MIA-9_Repair.pdb'] <- "V_MIA-9"
+AD_SD$Timeorder[AD_SD$Structure=='MIA-2_Repair.pdb'] <- "B_MIA-2"
+AD_SD$Timeorder[AD_SD$Structure=='MIA-3_Repair.pdb'] <- "C_MIA-3"
+AD_SD$Timeorder[AD_SD$Structure=='THF_Repair.pdb'] <- "S_THF"
+AD_SD$Timeorder[AD_SD$Structure=='PHFa_Repair.pdb'] <- "T_PHFa"
+AD_SD$Timeorder[AD_SD$Structure=='PHFb_Repair.pdb'] <- "U_PHFb"
+
+#Filter out structures with very low resolutions or high steric clashes
+AD_resolution <- read.delim("Files/Resolution/AD_resolution.txt")
+poor_structures <- AD_SD %>%
+  group_by(Timeorder,Chain) %>%
+  summarize(max_value = max(V16))
+poor_structures <- merge(poor_structures, AD_resolution)
+poor_structures$flag <- ifelse(poor_structures$Resolution > (3.5 - 0.125 * poor_structures$max_value), "Above Line", "Below Line")
+poor_structures$clean_labels <- gsub("^[A-Z]_", "", poor_structures$Timeorder)
+poor_structures$clean_labels <- paste0(poor_structures$clean_labels,"_",poor_structures$Chain)
+p <- ggplot(poor_structures, aes(x = max_value, y = Resolution, color = flag)) +
+  geom_point(size = 3) +  # Scatter plot
+  # Label only the red points (Above Line)
+  geom_text_repel(aes(label = ifelse(flag == "Above Line", clean_labels, NA)), 
+                  size = 3, 
+                  max.overlaps = Inf) +  
+  # Partitioning line
+  geom_abline(intercept = 3.5, slope = -0.125, linetype = "dashed", color = "black", size = 1) +  
+  # Color customization
+  scale_color_manual(values = c("Above Line" = "red", "Below Line" = "black")) +  
+  # Labels and theme
+  labs(x = "Max. VDW clash value (kcal/mol)", y = "Resolution (Å)", color = "Status") +
+  theme_bw(base_size = 14) +  
+  theme(
+    aspect.ratio = 1,  
+    panel.border = element_rect(color = "black", fill = NA, size = 1),  
+    # Ensure all text is black
+    text = element_text(color = "black"),  
+    axis.text.x = element_text(color = "black", angle = 45, hjust = 1, size = 12),  
+    axis.text.y = element_text(color = "black", size = 12),  
+    axis.title.x = element_text(color = "black", size = 12),  
+    axis.title.y = element_text(color = "black", size = 12),  
+    plot.subtitle = element_text(color = "black", size = 12),  
+    plot.caption = element_text(color = "black", size = 12),  
+    legend.text = element_text(color = "black", size = 12),  
+    legend.title = element_text(color = "black", size = 12),  
+    legend.position = "none"
+  )
+p
+poor_structures$id <- paste0(poor_structures$Timeorder,"_",poor_structures$Chain)
+AD_SD$id <- paste0(AD_SD$Timeorder,"_",AD_SD$Chain)
+AD_SD <- subset(AD_SD, !id %in% poor_structures$id[which(poor_structures$flag == "Above Line")])
+```
+
+Make Ramachandran plot (Supplementary Figure 3a).
+
+```{r}
+colours <- c("white","darkblue", "lightblue", "yellow","red")
+data3 <- AD_SD
+data3$TO_Chains <- NULL
+data3$Column <- NULL
+data3$CombinedLabel <- with(data3, paste0(Timeorder, " ", Chain))
+SSdensity <- ggplot(data3, aes(x = V6, y = V7)) +
+  geom_point() + 
+  stat_density2d(aes(fill = ..density..^0.20), geom = "tile", contour = FALSE) + 
+  scale_fill_gradientn(
+    limits = c(0, 0.3),
+    colours = colours
+  ) +
+  scale_x_continuous(expand = c(0, 0), limits = c(-180, 180)) +
+  scale_y_continuous(expand = c(0, 0), limits = c(-180, 180)) +
+  facet_wrap(~ CombinedLabel, ncol = 7) +
+  coord_fixed() +  # <-- this ensures square plots
+  ylab("Psi (degrees)") +
+  xlab("Phi (degrees)") +
+  theme(
+    strip.background = element_blank(),
+    panel.border = element_rect(color = "black", fill = NA, size = 1)
+  )
+SSdensity
+```
+
+Calculate distribution of dG energies, backbone H-bond energies, solvation energies and side chain burial (Figure 3b, Figure 3c, Figure 3d, Figure 3e, Supplementary Figure 3b, Supplementary Figure 3c, Supplementary Figure 3d and Supplementary Figure 3e).
+
+```{r}
+library(viridis)
+time_order_color <- data.frame(names(table(data3$Timeorder)),viridis(n = 16, option = "D"))
+colnames(time_order_color) <- c("Timeorder","Color")
+data3 <- merge(data3,time_order_color)
+
+#Calculate dg on subset of structures (all protofibrils)
+data33 <- subset(data3, Timeorder %in% c("A_MIA-1","D_MIA-4","K_MIA-11","O_LIA-5","S_THF","U_PHFb"))
+q <- ggplot(data33, aes(x = V9, color = Timeorder)) +
+  geom_density(alpha = 0.3, size = 1.1) +  # Add density with transparency
+  scale_color_manual(values = setNames(data33$Color, data33$Timeorder)) +  # Use assigned colors
+  labs(
+    x = "dG residue contribution (kcal/mol)",
+    y = "Density"
+  ) +
+  #xlim(NA, 5) +
+  theme_bw(base_size = 14) + 
+  theme(
+    aspect.ratio = 1,  # Forces a square aspect ratio
+    panel.border = element_rect(color = "black", fill = NA, size = 1),  # Adds a box
+    plot.title = element_text(face = "bold", size = 20)  # Bold title if needed
+  ) +
+  theme(
+    text = element_text(color = "black"),  # Ensures all text is black
+    axis.text.x = element_text(color = "black", angle = 45, hjust = 1, size = 12),  
+    axis.text.y = element_text(color = "black", size = 12),  
+    axis.title.x = element_text(color = "black", size = 12),  
+    axis.title.y = element_text(color = "black", size = 12),  
+    plot.title = element_text(color = "black", size = 12),  
+    plot.subtitle = element_text(color = "black", size = 12),  
+    plot.caption = element_text(color = "black", size = 12),  
+    legend.text = element_text(color = "black", size = 12),  
+    legend.title = element_text(color = "black", size = 12),  
+    legend.position = "none"  # Removes legend
+  )
+q
+
+#Calculate dg on ALL structures (all protofibrils)
+q <- ggplot(data3, aes(x = V9, color = Timeorder)) +
+  geom_density(alpha = 0.3, size = 1.1) +  # Add density with transparency
+  scale_color_manual(values = setNames(data3$Color, data3$Timeorder)) +  # Use assigned colors
+  labs(
+    x = "dG residue contribution (kcal/mol)",
+    y = "Density"
+  ) +
+  #xlim(NA, 5) +
+  theme_bw(base_size = 14) + 
+  theme(
+    aspect.ratio = 1,  # Forces a square aspect ratio
+    panel.border = element_rect(color = "black", fill = NA, size = 1),  # Adds a box
+    plot.title = element_text(face = "bold", size = 20)  # Bold title if needed
+  ) +
+  theme(
+    text = element_text(color = "black"),  # Ensures all text is black
+    axis.text.x = element_text(color = "black", angle = 45, hjust = 1, size = 12),  
+    axis.text.y = element_text(color = "black", size = 12),  
+    axis.title.x = element_text(color = "black", size = 12),  
+    axis.title.y = element_text(color = "black", size = 12),  
+    plot.title = element_text(color = "black", size = 12),  
+    plot.subtitle = element_text(color = "black", size = 12),  
+    plot.caption = element_text(color = "black", size = 12),  
+    legend.text = element_text(color = "black", size = 12),  
+    legend.title = element_text(color = "black", size = 12),  
+    legend.position = "none"  # Removes legend
+  )
+q
+
+#Quantification of highly destabilizing residues per structure 
+data3$dis <- "No"
+data3$dis[which(data3$V9 > 1.5)] <- "Yes"
+beta_sheet_cor <- as.data.frame(table(data3$Timeorder,data3$dis))
+beta_sheet_cor2 <- as.data.frame(table(data3$Timeorder))
+beta_sheet_cor <- subset(beta_sheet_cor, Var2 == "Yes" & Freq != 0)
+beta_sheet_cor2 <- subset(beta_sheet_cor2, Freq != 0)
+colnames(beta_sheet_cor2)[2]<- "Freq2"
+beta_sheet_cor <- merge(beta_sheet_cor,beta_sheet_cor2)
+beta_sheet_cor$per <- beta_sheet_cor$Freq / beta_sheet_cor$Freq2 * 100
+beta_sheet_cor_summary <- beta_sheet_cor %>%
+  group_by(Var1) %>%
+  summarize(avg_value = mean(per))
+beta_sheet_cor_summary$order <- as.numeric(rownames(beta_sheet_cor_summary))
+beta_sheet_cor <- merge(beta_sheet_cor,beta_sheet_cor_summary)
+# Perform correlation on the averages
+cor_result <- cor.test(beta_sheet_cor_summary$order, beta_sheet_cor_summary$avg_value)
+# Create the plot
+beta_sheet_cor$clean_labels <- gsub("^[A-Z]_", "", beta_sheet_cor$Var1)
+colnames(time_order_color)[1] <- "Var1"
+beta_sheet_cor <- merge(beta_sheet_cor,time_order_color)
+p <- ggplot(beta_sheet_cor, aes(x = clean_labels, y = per, color = clean_labels)) +
+  geom_point(alpha = 1, size = 3) +  # Points colored by Var2
+  scale_color_manual(values = setNames(beta_sheet_cor$Color, beta_sheet_cor$clean_labels)) +
+  geom_smooth(data = beta_sheet_cor_summary, aes(x = order, y = avg_value),
+              method = "lm", color = "black", linetype = "dashed", se = FALSE) +  # Dashed correlation line
+  labs(
+    x = NULL,  # No label for x-axis
+    y = "% of highly destabilizing residues (dG > 1.5 kcal/mol)",  # Updated y-axis label
+    color = "Protofibril"  # Legend title
+  ) +
+  scale_x_discrete(limits = unique(beta_sheet_cor$clean_labels)) +  # Set x-axis labels
+  annotate("text", x = 1, y = max(beta_sheet_cor$per),  # Adjust position as needed
+           label = paste("Correlation:", round(cor_result$estimate, 2), 
+                         "\nP-value:", format(cor_result$p.value, digits = 5)),
+           hjust = 0, vjust = 1, color = "black", size = 4) +  # Adjust annotation text size (4 = ~12 pt)
+  theme_bw(base_size = 14) + 
+  theme(
+    aspect.ratio = 1,  # Forces a square aspect ratio
+    panel.border = element_rect(color = "black", fill = NA, size = 1),  # Adds a box
+    plot.title = element_text(face = "bold", size = 20)  # Bold title if needed
+  ) +
+  theme(
+    text = element_text(color = "black"),  # Ensures all text is black
+    axis.text.x = element_text(color = "black", angle = 45, hjust = 1, size = 12),  
+    axis.text.y = element_text(color = "black", size = 12),  
+    axis.title.x = element_text(color = "black", size = 12),  
+    axis.title.y = element_text(color = "black", size = 12),  
+    plot.title = element_text(color = "black", size = 12),  
+    plot.subtitle = element_text(color = "black", size = 12),  
+    plot.caption = element_text(color = "black", size = 12),  
+    legend.text = element_text(color = "black", size = 12),  
+    legend.title = element_text(color = "black", size = 12),  
+    legend.position = "none"  # Removes legend
+)
+p
+
+#Calculate backbone H-bond on subset of structures (all protofibrils)
+data33 <- subset(data3, Timeorder %in% c("A_MIA-1","D_MIA-4","K_MIA-11","O_LIA-5","S_THF","U_PHFb"))
+q <- ggplot(data33, aes(x = V10, color = Timeorder)) +
+  geom_density(alpha = 0.3, size = 1.1) +  # Add density with transparency
+  scale_color_manual(values = setNames(data33$Color, data33$Timeorder)) +  # Use assigned colors
+  labs(
+    x = "Backbone H-bond (kcal/mol)",
+    y = "Density"
+  ) +
+  #xlim(NA, 5) +
+  theme_bw(base_size = 14) + 
+  theme(
+    aspect.ratio = 1,  # Forces a square aspect ratio
+    panel.border = element_rect(color = "black", fill = NA, size = 1),  # Adds a box
+    plot.title = element_text(face = "bold", size = 20)  # Bold title if needed
+  ) +
+  theme(
+    text = element_text(color = "black"),  # Ensures all text is black
+    axis.text.x = element_text(color = "black", angle = 45, hjust = 1, size = 12),  
+    axis.text.y = element_text(color = "black", size = 12),  
+    axis.title.x = element_text(color = "black", size = 12),  
+    axis.title.y = element_text(color = "black", size = 12),  
+    plot.title = element_text(color = "black", size = 12),  
+    plot.subtitle = element_text(color = "black", size = 12),  
+    plot.caption = element_text(color = "black", size = 12),  
+    legend.text = element_text(color = "black", size = 12),  
+    legend.title = element_text(color = "black", size = 12),  
+    legend.position = "none"  # Removes legend
+  )
+q
+
+#Calculate backbone H-bond on ALL structures (all protofibrils)
+q <- ggplot(data3, aes(x = V10, color = Timeorder)) +
+  geom_density(alpha = 0.3, size = 1.1) +  # Add density with transparency
+  scale_color_manual(values = setNames(data3$Color, data3$Timeorder)) +  # Use assigned colors
+  labs(
+    x = "Backbone H-bond (kcal/mol)",
+    y = "Density"
+  ) +
+  #xlim(NA, 5) +
+  theme_bw(base_size = 14) + 
+  theme(
+    aspect.ratio = 1,  # Forces a square aspect ratio
+    panel.border = element_rect(color = "black", fill = NA, size = 1),  # Adds a box
+    plot.title = element_text(face = "bold", size = 20)  # Bold title if needed
+  ) +
+  theme(
+    text = element_text(color = "black"),  # Ensures all text is black
+    axis.text.x = element_text(color = "black", angle = 45, hjust = 1, size = 12),  
+    axis.text.y = element_text(color = "black", size = 12),  
+    axis.title.x = element_text(color = "black", size = 12),  
+    axis.title.y = element_text(color = "black", size = 12),  
+    plot.title = element_text(color = "black", size = 12),  
+    plot.subtitle = element_text(color = "black", size = 12),  
+    plot.caption = element_text(color = "black", size = 12),  
+    legend.text = element_text(color = "black", size = 12),  
+    legend.title = element_text(color = "black", size = 12),  
+    legend.position = "none"  # Removes legend
+  )
+
+#Calculate average backbond H-bond energy per structure 
+beta_sheet_cor <- data3 %>%
+  group_by(Timeorder) %>%
+  summarize(avg_value = mean(V10))
+# Perform correlation on the averages
+beta_sheet_cor$order <- as.numeric(rownames(beta_sheet_cor))
+cor_result <- cor.test(beta_sheet_cor$order, beta_sheet_cor$avg_value)
+beta_sheet_cor$clean_labels <- gsub("^[A-Z]_", "", beta_sheet_cor$Timeorder)
+colnames(time_order_color)[1] <- "Timeorder"
+beta_sheet_cor <- merge(beta_sheet_cor,time_order_color)
+p <- ggplot(beta_sheet_cor, aes(x = clean_labels, y = avg_value, color = clean_labels)) +
+  geom_point(alpha = 1, size = 3) +  # Points colored by Var2
+  scale_color_manual(values = setNames(beta_sheet_cor$Color, beta_sheet_cor$clean_labels)) +
+  geom_smooth(data = beta_sheet_cor, aes(x = order, y = avg_value),
+              method = "lm", color = "black", linetype = "dashed", se = FALSE) +  # Dashed correlation line
+  labs(
+    x = NULL,  # No label for x-axis
+    y = "Average backbone H-bond energy (kcal/mol)",  # Updated y-axis label
+    color = "Protofibril"  # Legend title
+  ) +
+  scale_x_discrete(limits = unique(beta_sheet_cor$clean_labels)) +  # Set x-axis labels
+  annotate("text", x = 1, y = max(beta_sheet_cor$avg_value),  # Adjust position as needed
+           label = paste("Correlation:", round(cor_result$estimate, 2), 
+                         "\nP-value:", format(cor_result$p.value, digits = 5)),
+           hjust = 0, vjust = 1, color = "black", size = 4) +  # Adjust annotation text size (4 = ~12 pt)
+  theme_bw(base_size = 14) + 
+  theme(
+    aspect.ratio = 1,  # Forces a square aspect ratio
+    panel.border = element_rect(color = "black", fill = NA, size = 1),  # Adds a box
+    plot.title = element_text(face = "bold", size = 20)  # Bold title if needed
+  ) +
+  theme(
+    text = element_text(color = "black"),  # Ensures all text is black
+    axis.text.x = element_text(color = "black", angle = 45, hjust = 1, size = 12),  
+    axis.text.y = element_text(color = "black", size = 12),  
+    axis.title.x = element_text(color = "black", size = 12),  
+    axis.title.y = element_text(color = "black", size = 12),  
+    plot.title = element_text(color = "black", size = 12),  
+    plot.subtitle = element_text(color = "black", size = 12),  
+    plot.caption = element_text(color = "black", size = 12),  
+    legend.text = element_text(color = "black", size = 12),  
+    legend.title = element_text(color = "black", size = 12),  
+    legend.position = "none"  # Removes legend
+)
+p
+
+#Calculate Solvation energy on ALL structures
+q <- ggplot(data3, aes(x = V15, color = Timeorder)) +
+  geom_density(alpha = 0.3, size = 1.1) +  # Add density with transparency
+  scale_color_viridis(discrete = TRUE) +  # Use Viridis color palette for line color
+  labs(
+    x = "Solvation (kcal/mol)",
+    y = "Density"
+  ) +
+  #xlim(NA, 5) +
+  theme_bw(base_size = 14) + 
+  theme(
+    aspect.ratio = 1,  # Forces a square aspect ratio
+    panel.border = element_rect(color = "black", fill = NA, size = 1),  # Adds a box
+    plot.title = element_text(face = "bold", size = 20)  # Bold title if needed
+  ) +
+  theme(
+    text = element_text(color = "black"),  # Ensures all text is black
+    axis.text.x = element_text(color = "black", angle = 45, hjust = 1, size = 12),  
+    axis.text.y = element_text(color = "black", size = 12),  
+    axis.title.x = element_text(color = "black", size = 12),  
+    axis.title.y = element_text(color = "black", size = 12),  
+    plot.title = element_text(color = "black", size = 12),  
+    plot.subtitle = element_text(color = "black", size = 12),  
+    plot.caption = element_text(color = "black", size = 12),  
+    legend.text = element_text(color = "black", size = 12),  
+    legend.title = element_text(color = "black", size = 12),  
+    legend.position = "none"  # Removes legend
+  )
+q
+
+#Calculate Side chain burial on ALL structures
+q <- ggplot(data3, aes(x = V33, color = Timeorder)) +
+  geom_density(alpha = 0.3, size = 1.1) +  # Add density with transparency
+  scale_color_viridis(discrete = TRUE) +  # Use Viridis color palette for line color
+  labs(
+    x = "Side chain burial",
+    y = "Density"
+  ) +
+  #xlim(NA, 5) +
+  theme_bw(base_size = 14) + 
+  theme(
+    aspect.ratio = 1,  # Forces a square aspect ratio
+    panel.border = element_rect(color = "black", fill = NA, size = 1),  # Adds a box
+    plot.title = element_text(face = "bold", size = 20)  # Bold title if needed
+  ) +
+  theme(
+    text = element_text(color = "black"),  # Ensures all text is black
+    axis.text.x = element_text(color = "black", angle = 45, hjust = 1, size = 12),  
+    axis.text.y = element_text(color = "black", size = 12),  
+    axis.title.x = element_text(color = "black", size = 12),  
+    axis.title.y = element_text(color = "black", size = 12),  
+    plot.title = element_text(color = "black", size = 12),  
+    plot.subtitle = element_text(color = "black", size = 12),  
+    plot.caption = element_text(color = "black", size = 12),  
+    legend.text = element_text(color = "black", size = 12),  
+    legend.title = element_text(color = "black", size = 12),  
+    legend.position = "none"  # Removes legend
+  )
+q
+```
+
+Per-residue energy profiles (Figure 3F)
+
+```{r}
+#Start by filtering out the outer chains as well as the two most outer residues
+data3_filtered <- subset(data3, !V3 %in% c("A","B","S","T","d","U","n","e"))
+data3_filtered$factor <- paste0(data3_filtered$Timeorder,"_",data3_filtered$Chain)
+data3_filtered$TO_Chains <- paste0(data3_filtered$TO_Chains,"_",data3_filtered$type)
+aggregate_energies <-  aggregate(V9 ~ factor + V4, data=data3_filtered, FUN="mean")
+aggregate_energies <- subset(aggregate_energies, !V4 %in% c(304,379))
+aggregate_energies2 <- tidyr::spread(aggregate_energies, V4,V9)
+rownames(aggregate_energies2) <- aggregate_energies2$factor
+aggregate_energies2<-aggregate_energies2[, -1]
+a <- Heatmap(as.matrix(aggregate_energies2), 
+        name = "DDG (Kcal/mol)", cluster_columns = FALSE, col = circlize::colorRamp2(c(4,0,-4), c("red", "white", "blue")),
+        column_names_gp = gpar(fontsize = 12) , row_names_gp = gpar(fontsize = 12),border_gp = gpar(col = "black", lty = 1), 
+        cluster_rows = FALSE)
+a
+#In the paper, the energies were actually exported to Prism
+```
+
+PCA analysis for all CTE fibrils (Figure 3g and Figure 4h).
+
+```{r}
+list_names <- strsplit(as.character(rownames(aggregate_energies2)), "_")
+res1 <- matrix(nrow = nrow(aggregate_energies2), ncol = 1)
+res2 <- matrix(nrow = nrow(aggregate_energies2), ncol = 1)
+res3 <- matrix(nrow = nrow(aggregate_energies2), ncol = 1)
+for (i in 1:nrow(aggregate_energies2)){
+  res1[i,] <- list_names[[i]][1]
+  res2[i,] <- list_names[[i]][2]
+  res3[i,] <- list_names[[i]][3]
+}
+Structure <- res1
+Structure <- paste0(Structure,"_",res2)
+Protofilaments <- res3
+group_numbers <- rep(seq_along(rle(Structure)$values), rle(Structure)$lengths)
+#Data imputation for missing values
+imputed_data <- imputePCA(aggregate_energies2, ncp=2, method = "Regularized")
+#New dataframe with imputed data for plotting in Prism
+imputed_energies <- as.data.frame(imputed_data$completeObs)
+#Run PCA
+PCA <- prcomp(imputed_energies, scale. = TRUE)
+#Principal components in a dataframe
+emb <- as.data.frame(PCA$x)
+emb$Structure <- Structure
+emb$Protofilaments <- Protofilaments
+emb$colnum<- group_numbers
+#extract Variances of main PCs -Do this for PC1, PC2 and PC3
+PC1_contr<-fviz_contrib(PCA, choice = "var", axes = 1)
+PC1_final<-as.data.frame(PC1_contr[1])
+PC2_contr<-fviz_contrib(PCA, choice = "var", axes = 2)
+PC2_final<-as.data.frame(PC2_contr[1])
+PC3_contr<-fviz_contrib(PCA, choice = "var", axes = 3)
+PC3_final<-as.data.frame(PC3_contr[1])
+# Perform K-Means Clustering
+set.seed(123)  # For reproducibility
+num_clusters <- 2  # Change this based on the data
+kmeans_result <- kmeans(emb[, c("PC1", "PC2", "PC3")], centers = num_clusters)
+emb$cluster <- as.factor(kmeans_result$cluster)
+emb$colnum <- as.factor(emb$colnum)
+# Find max values for each axis
+max_PC1 <- max(emb$PC1)
+max_PC2 <- max(emb$PC2)
+max_PC3 <- max(emb$PC3)
+min_PC1 <- min(emb$PC1)
+min_PC2 <- min(emb$PC2)
+min_PC3 <- min(emb$PC3)
+#Get PC axis contributions
+fviz_eig(PCA, addlabels = TRUE, ylim = c(0, 90))
+fviz_pca_var(PCA, col.var = "contrib",
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07")
+)
+plot <- plot_ly() %>%
+  # Main 3D scatter plot
+  add_trace(
+    data = emb,
+    x = ~PC1, 
+    y = ~PC2, 
+    z = ~PC3,
+    #text = ~names,
+    type = "scatter3d", 
+    mode = "markers+text",
+    marker = list(color = ~colnum,
+                  colorscale = "Viridis",
+                  size = 8, 
+                  opacity = 0.8, 
+                  line = list(color = 'black', width = 1))
+  ) %>%
+  # XY projection (Z = 0)
+  add_trace(
+    data = emb,
+    x = ~PC1, 
+    y = ~PC2, 
+    z = min_PC3,
+    type = "scatter3d",
+    mode = "markers",
+    marker = list(color = ~colnum,
+                  colorscale = "Viridis",
+                  size = 1, 
+                  opacity = 1, 
+                  symbol = 'circle')
+  ) %>%
+  # XZ projection (Y = 0)
+  add_trace(
+    data = emb,
+    x = ~PC1, 
+    y = min_PC2, 
+    z = ~PC3,
+    type = "scatter3d",
+    mode = "markers",
+    marker = list(color = ~colnum,
+                  colorscale = "Viridis",
+                  size = 1, 
+                  opacity = 1, 
+                  symbol = 'circle')
+  ) %>%
+  # YZ projection (X = 0)
+  add_trace(
+    data = emb,
+    x = max_PC1, 
+    y = ~PC2, 
+    z = ~PC3,
+    type = "scatter3d",
+    mode = "markers",
+    marker = list(color = ~colnum,
+                  colorscale = "Viridis",
+                  size = 1, 
+                  opacity = 1, 
+                  symbol = 'circle')
+  ) %>%
+  # Customize layout
+  layout(
+    title = "3D Plot of Secondary Structure Content with 2D Projections",
+    scene = list(
+      xaxis = list(title = "<b>PC1 (19%)</b>", linewidth = 4),
+      yaxis = list(title = "<b>PC2 (12.9%)</b>", linewidth = 4),
+      zaxis = list(title = "<b>PC3 (8.7%)</b>", linewidth = 4),
+      aspectmode = "manual",
+      aspectratio = list(x = 1, y = 1, z = 1),  # Adjust ratio for visibility
+      camera = list(eye = list(x = -2.5, y = -1.8, z = 1))
+    )
+  )
+# Show the plot
+plot
+```
+
+Metal binding sites correlations (Figure 5c, Figure 5d and Figure 5e).
+
+```{r}
+mg_ad_table <- read.delim("Files/MG_analysis/mg_ad_table.txt")
+time_order_map <- unique(subset(AD_SD, select = c(40,41)))
+mg_ad_table <- merge(mg_ad_table, time_order_map)
+mg_ad_table <- merge(mg_ad_table,time_order_color)
+mg_ad_table$id <- paste0(mg_ad_table$Timeorder,"_",mg_ad_table$Chain)
+mg_ad_table <- subset(mg_ad_table, !id %in% c("S_THF_A","Q_LIA-7_A"))
+poor_structures <- merge(poor_structures, time_order_map)
+time_order_color <- data.frame(names(table(AD_SD$Timeorder)),viridis(n = 16, option = "D"))
+colnames(time_order_color) <- c("Timeorder","Color")
+poor_structures <- merge(poor_structures,time_order_color)
+poor_structures$clean_labels <- gsub("^[A-Z]_", "", poor_structures$Timeorder)
+
+#J-shaped analysis
+mg_ad_table2 <- subset(mg_ad_table, Type == "J")
+# Calculate average for each time point
+mg_ad_table_summary <- mg_ad_table2 %>%
+  group_by(Timeorder) %>%
+  summarize(avg_value = mean(Value))
+mg_ad_table2 <- merge(mg_ad_table2,mg_ad_table_summary)
+# Perform correlation on the averages
+mg_ad_table_summary$order <- as.numeric(rownames(mg_ad_table_summary))
+cor_result <- cor.test(mg_ad_table_summary$order, mg_ad_table_summary$avg_value)
+mg_ad_table2$clean_labels <- gsub("^[A-Z]_", "", mg_ad_table2$Timeorder)
+p <- ggplot(mg_ad_table2, aes(x = clean_labels, y = Value, color = clean_labels, shape = Chain)) +
+  geom_point(alpha = 1, size = 3) +  
+  scale_color_manual(values = setNames(poor_structures$Color, poor_structures$clean_labels)) +
+  scale_shape_manual(values = c(16, 17, 18, 19, 15)) +  # Different shapes for Chains
+  geom_smooth(data = mg_ad_table_summary, aes(x = order, y = avg_value),
+              method = "lm", color = "black", linetype = "dashed", se = FALSE, inherit.aes = FALSE) +  
+  labs(
+    x = NULL,  
+    y = "Number of Mg ions",  
+    color = "Protofibril",  
+    shape = "Chain"  
+  ) +
+  scale_x_discrete(limits = unique(mg_ad_table2$clean_labels)) +  
+  annotate("text", x = 1, y = max(mg_ad_table2$Value),  
+           label = paste("Correlation:", round(cor_result$estimate, 2), 
+                         "\nP-value:", format(cor_result$p.value, digits = 5)),
+           hjust = 0, vjust = 1, color = "black", size = 4) +  
+  theme_bw(base_size = 14) + 
+  theme(
+    aspect.ratio = 1,  
+    panel.border = element_rect(color = "black", fill = NA, size = 1),  
+    plot.title = element_text(face = "bold", size = 20)  
+  ) +
+  theme(
+    text = element_text(color = "black"),  
+    axis.text.x = element_text(color = "black", angle = 45, hjust = 1, size = 12),  
+    axis.text.y = element_text(color = "black", size = 12),  
+    axis.title.x = element_text(color = "black", size = 12),  
+    axis.title.y = element_text(color = "black", size = 12),  
+    plot.title = element_text(color = "black", size = 12),  
+    plot.subtitle = element_text(color = "black", size = 12),  
+    plot.caption = element_text(color = "black", size = 12),  
+    legend.text = element_text(color = "black", size = 12),  
+    legend.title = element_text(color = "black", size = 12)
+)
+p
+
+#C-shaped analysis
+mg_ad_table2 <- subset(mg_ad_table, Type == "C")
+# Calculate average for each time point
+mg_ad_table_summary <- mg_ad_table2 %>%
+  group_by(Timeorder) %>%
+  summarize(avg_value = mean(Value))
+mg_ad_table2 <- merge(mg_ad_table2,mg_ad_table_summary)
+# Perform correlation on the averages
+mg_ad_table_summary$order <- as.numeric(rownames(mg_ad_table_summary))
+cor_result <- cor.test(mg_ad_table_summary$order, mg_ad_table_summary$avg_value)
+mg_ad_table2$clean_labels <- gsub("^[A-Z]_", "", mg_ad_table2$Timeorder)
+p <- ggplot(mg_ad_table2, aes(x = clean_labels, y = Value, color = clean_labels, shape = Chain)) +
+  geom_point(alpha = 1, size = 3) +  
+  scale_color_manual(values = setNames(poor_structures$Color, poor_structures$clean_labels)) +
+  scale_shape_manual(values = c(16, 17, 18, 19, 15)) +  # Different shapes for Chains
+  geom_smooth(data = mg_ad_table_summary, aes(x = order, y = avg_value),
+              method = "lm", color = "black", linetype = "dashed", se = FALSE, inherit.aes = FALSE) +  
+  labs(
+    x = NULL,  
+    y = "Number of Mg ions",  
+    color = "Protofibril",  
+    shape = "Chain"  
+  ) +
+  scale_x_discrete(limits = unique(mg_ad_table2$clean_labels)) +  
+  annotate("text", x = 1, y = max(mg_ad_table2$Value),  
+           label = paste("Correlation:", round(cor_result$estimate, 2), 
+                         "\nP-value:", format(cor_result$p.value, digits = 5)),
+           hjust = 0, vjust = 1, color = "black", size = 4) +  
+  theme_bw(base_size = 14) + 
+  theme(
+    aspect.ratio = 1,  
+    panel.border = element_rect(color = "black", fill = NA, size = 1),  
+    plot.title = element_text(face = "bold", size = 20)  
+  ) +
+  theme(
+    text = element_text(color = "black"),  
+    axis.text.x = element_text(color = "black", angle = 45, hjust = 1, size = 12),  
+    axis.text.y = element_text(color = "black", size = 12),  
+    axis.title.x = element_text(color = "black", size = 12),  
+    axis.title.y = element_text(color = "black", size = 12),  
+    plot.title = element_text(color = "black", size = 12),  
+    plot.subtitle = element_text(color = "black", size = 12),  
+    plot.caption = element_text(color = "black", size = 12),  
+    legend.text = element_text(color = "black", size = 12),  
+    legend.title = element_text(color = "black", size = 12)
+)
+p
+
+#C-shaped analysis
+mg_ad_table2 <- mg_ad_table
+# Calculate average for each time point
+mg_ad_table_summary <- mg_ad_table2 %>%
+  group_by(Timeorder) %>%
+  summarize(avg_value = mean(Value))
+mg_ad_table2 <- merge(mg_ad_table2,mg_ad_table_summary)
+# Perform correlation on the averages
+mg_ad_table_summary$order <- as.numeric(rownames(mg_ad_table_summary))
+cor_result <- cor.test(mg_ad_table_summary$order, mg_ad_table_summary$avg_value)
+mg_ad_table2$clean_labels <- gsub("^[A-Z]_", "", mg_ad_table2$Timeorder)
+p <- ggplot(mg_ad_table2, aes(x = clean_labels, y = Value, color = clean_labels, shape = Chain)) +
+  geom_point(alpha = 1, size = 3) +  
+  scale_color_manual(values = setNames(poor_structures$Color, poor_structures$clean_labels)) +
+  scale_shape_manual(values = c(16, 17, 18, 19, 15)) +  # Different shapes for Chains
+  geom_smooth(data = mg_ad_table_summary, aes(x = order, y = avg_value),
+              method = "lm", color = "black", linetype = "dashed", se = FALSE, inherit.aes = FALSE) +  
+  labs(
+    x = NULL,  
+    y = "Number of Mg ions",  
+    color = "Protofibril",  
+    shape = "Chain"  
+  ) +
+  scale_x_discrete(limits = unique(mg_ad_table2$clean_labels)) +  
+  annotate("text", x = 1, y = max(mg_ad_table2$Value),  
+           label = paste("Correlation:", round(cor_result$estimate, 2), 
+                         "\nP-value:", format(cor_result$p.value, digits = 5)),
+           hjust = 0, vjust = 1, color = "black", size = 4) +  
+  theme_bw(base_size = 14) + 
+  theme(
+    aspect.ratio = 1,  
+    panel.border = element_rect(color = "black", fill = NA, size = 1),  
+    plot.title = element_text(face = "bold", size = 20)  
+  ) +
+  theme(
+    text = element_text(color = "black"),  
+    axis.text.x = element_text(color = "black", angle = 45, hjust = 1, size = 12),  
+    axis.text.y = element_text(color = "black", size = 12),  
+    axis.title.x = element_text(color = "black", size = 12),  
+    axis.title.y = element_text(color = "black", size = 12),  
+    plot.title = element_text(color = "black", size = 12),  
+    plot.subtitle = element_text(color = "black", size = 12),  
+    plot.caption = element_text(color = "black", size = 12),  
+    legend.text = element_text(color = "black", size = 12),  
+    legend.title = element_text(color = "black", size = 12)
+)
+p
+```
+
+Check the effect of Mg on PHFb (Figure 5g).
+
+```{r}
+# Open sequence detail with metals
+SD_MG_AD.PHFb_Repair <- read.delim("Files/Sequence_Detail_Files/SD_MG_AD-PHFb_Repair.fxout", header=FALSE)
+PHFb <- subset(AD_SD, Structure == "PHFb_Repair.pdb")
+SD_MG_AD.PHFb_Repair <- subset(SD_MG_AD.PHFb_Repair, !V2 %in% c("MG","GAP") & V5 != -9999.000)
+PHFb$metal_dg <- SD_MG_AD.PHFb_Repair$V9
+PHFb$difference <- PHFb$metal_dg - PHFb$V9
+PHFb2 <- subset(PHFb, V3 %in% c("H","J"))
+#Example energies
+PHFb2_energies <- subset(PHFb2, select = c(5,6,44))
+PHFb2_energies2 <- PHFb2_energies
+site1 <- subset(PHFb2_energies2, V4 %in% c(314, 316, 370, 372))
+site2 <- subset(PHFb2_energies2, V4 %in% c(353, 356, 358))
+site1 <- sum(site1$difference)
+site2 <- sum(site2$difference)
+# Create a dataframe
+df <- data.frame(
+  Site = c("Site 1", "Site 2"),
+  Value = c(site1, site2)
+)
+# Create the bar plot
+p <- ggplot(df, aes(x = Site, y = Value, fill = Site)) +
+  geom_bar(stat = "identity", width = 0.6) +  # Barplot with actual values
+  scale_fill_manual(values = c("Site 1" = "steelblue", "Site 2" = "tomato")) +  # Custom colors
+  labs(y = "ddG (kcal/mol)") +
+   theme_bw(base_size = 14) + 
+  theme(
+    aspect.ratio = 1,  
+    panel.border = element_rect(color = "black", fill = NA, size = 1),  
+    plot.title = element_text(face = "bold", size = 20)  
+  ) +
+  theme(
+    text = element_text(color = "black"),  
+    axis.text.x = element_text(color = "black", angle = 45, hjust = 1, size = 12),  
+    axis.text.y = element_text(color = "black", size = 12),  
+    axis.title.x = element_text(color = "black", size = 12),  
+    axis.title.y = element_text(color = "black", size = 12),  
+    plot.title = element_text(color = "black", size = 12),  
+    plot.subtitle = element_text(color = "black", size = 12),  
+    plot.caption = element_text(color = "black", size = 12),  
+    legend.text = element_text(color = "black", size = 12),  
+    legend.title = element_text(color = "black", size = 12)+
+    theme(legend.position = "none")
+)
+# Print plot
+print(p)
+```
