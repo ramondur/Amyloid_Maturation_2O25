@@ -1,0 +1,5 @@
+Timeorder	Resolution
+A_WT	3.3
+B_Hep-1	3.2
+C_Hep-2	3.2
+D_Hep-3	3.3
